@@ -59,9 +59,64 @@ feols(freedom_house ~ lag_freedom_house + lag_log_gdp_pc | year_numeric, data = 
 feols(freedom_house ~ lag_freedom_house + lag_log_gdp_pc | year_numeric, se = 'standard', data = ajry) # now doesn't cluster std error
 feols(freedom_house ~ lag_freedom_house + lag_log_gdp_pc | year_numeric, se = 'hetero', data = ajry) # hetero std error
 feols(freedom_house ~ lag_freedom_house + lag_log_gdp_pc | year_numeric, cluster = c('code_numeric'), data = ajry) # cluster on code_numeric
+fixest_pooled <- feols(freedom_house ~ lag_freedom_house + lag_log_gdp_pc | year_numeric, cluster = ~ code_numeric, data = ajry) # cluster on code_numeric(country), another way to write it
+
+# add country FE
+feols(freedom_house ~ lag_freedom_house + lag_log_gdp_pc | year_numeric + country, cluster = ~ code_numeric, data = ajry)
+fixest_fe <- feols(freedom_house ~ lag_freedom_house + lag_log_gdp_pc | year_numeric + country, cluster = ~ code_numeric, dof = dof(fixef.K = 'full'), data = ajry)  # to specify which dof to use
+
+# add instruments, use saving rate in t-2 to instrument for gdp pc in t-1
+# first create the saving rate lag
+ajry <- ajry %>% group_by(country) %>% mutate(lag2_save = lag(nsave, 2, order_by = year_numeric))
+# now iv reg
+feols(freedom_house ~ lag_freedom_house | year_numeric + country | lag_log_gdp_pc ~ lag2_save, cluster = ~ code_numeric, dof = dof(fixef.K = 'full'), data = ajry)
 
 
+# look at regression results ----------------------------------------------
+iv <- feols(freedom_house ~ lag_freedom_house | year_numeric + country | lag_log_gdp_pc ~ lag2_save, cluster = ~ code_numeric, dof = dof(fixef.K = 'full'), data = ajry)
+#method 1
+summary(iv)
+summary(iv, stage = 1)
+# method 2
+library(broom)
+iv_2nd <- tidy(iv)  # gives a tibble
+iv_1st <- tidy(iv, stage = 1)
+stats <- glance(iv)
 
+# create reg table --------------------------------------------------------
+library(modelsummary)
+# ols and FE
+models <- list('Pooled' = fixest_pooled, 'FE' = fixest_fe)  #put the models into a list first
+modelsummary(models)
+# coeff map
+cm <- c('lag_freedom_house' = 'democracy$_{t-1}$',
+        'lag_log_gdp_pc' = 'log GDP $_{t-1}$')
+modelsummary(models, coef_map = cm)
+# remove some stats
+omit_stat = 'AIC|BIC|Log.Lik.|R2 Within|R2 Pseudo|R2$'  # will omit all stats containing these strings, e.g., if write R2, will get rid of all R2s, but if write R2$, will only get rid of R2,(this is regular expression)
+modelsummary(models, coef_map = cm, gof_omit = omit_stat)
+
+# rename stats
+pooled_stats <- glance(pooled)
+stat_table <- tribble(~raw, ~clean, ~fmt, 'adj.r.squared', 'Adj. R$^2$', 2, 'nobs', 'N', 0)  # use 2 digits for R^2, 0 digit for N
+modelsummary(models, coef_map = cm,gof_map = stat_table )
+
+# add stars
+modelsummary(models, coef_map = cm,gof_map = stat_table, stars = TRUE)
+modelsummary(models, coef_map = cm,gof_map = stat_table, stars = c('*'  = 0.1, '**' = 0.05, '***' = 0.01))
+
+# add rows
+rows <- tribble(~term, ~m1, ~m2, 'time effects', 'yes', 'yes',
+                'country effects', 'no', 'yes')
+modelsummary(models, coef_map = cm,gof_map = stat_table, add_rows = rows)
+attr(rows, 'position') <- c(5,6)  # change location of the rows
+modelsummary(models, coef_map = cm,gof_map = stat_table, add_rows = rows)
+
+# save to latex
+if (!dir.exists('out_table')){
+  dir.create('out_table')
+}
+modelsummary(models, coef_map = cm,gof_map = stat_table, stars = c('*'  = 0.1, '**' = 0.05, '***' = 0.01), escape = FALSE, output = 'out_table/main_table.tex') # ESCAPE IS for using latex code here in the code
 
 
 
